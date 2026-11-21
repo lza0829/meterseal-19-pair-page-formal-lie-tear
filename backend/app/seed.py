@@ -9,6 +9,14 @@ POLICY_EDITABLE = "editable_until_sealed"
 VALID_POLICIES = (POLICY_LOCK_ON_ACTUAL, POLICY_EDITABLE)
 DEFAULT_POLICY = POLICY_LOCK_ON_ACTUAL
 
+# 全局只贯彻一种配对可见性口径，由 settings.pair_visibility_policy 决定：
+#   formal_intersection 配对页/总览以正式估抄∩实抄键集合为准（可重放）
+#   pair_projection     配对页/总览以对齐配对投影表为准（物化视图）
+PAIR_FORMAL = "formal_intersection"
+PAIR_PROJECTION = "pair_projection"
+VALID_PAIR_POLICIES = (PAIR_FORMAL, PAIR_PROJECTION)
+DEFAULT_PAIR_POLICY = PAIR_FORMAL
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meters (
   meter_id TEXT PRIMARY KEY,
@@ -85,6 +93,15 @@ CREATE TABLE IF NOT EXISTS estimate_corrections (
   doc_no TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
+-- 配对投影：对齐物化的配对可见性表；任意写事务提交时必须等于正式估抄∩实抄键集合
+CREATE TABLE IF NOT EXISTS pair_projection (
+  period_id TEXT NOT NULL,
+  meter_id TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'paired',
+  source_batch_id TEXT,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (period_id, meter_id)
+);
 """
 
 
@@ -102,8 +119,12 @@ def migrate(conn) -> None:
     # 对齐批快照记录生成时的口径与锁计数
     _add_column_if_missing(conn, "reconcile_batches", "policy", "policy TEXT")
     _add_column_if_missing(conn, "reconcile_batches", "locked_count", "locked_count INTEGER NOT NULL DEFAULT 0")
+    # 对齐批快照记录生成时的已配对键数（正式估抄∩实抄）
+    _add_column_if_missing(conn, "reconcile_batches", "paired_count", "paired_count INTEGER NOT NULL DEFAULT 0")
     # 每条差额快照该表该账期在对齐瞬间的锁标记
     _add_column_if_missing(conn, "variances", "estimate_locked", "estimate_locked INTEGER NOT NULL DEFAULT 0")
+    # 旧版 JSON 页面缓存废弃：配对投影以 pair_projection 表为准，禁止只改页面缓存
+    conn.execute("DELETE FROM settings WHERE key='pair_projection_v1'")
 
 
 def _backfill_locks(conn) -> None:
@@ -118,6 +139,13 @@ def _backfill_locks(conn) -> None:
                              ORDER BY loaded_at LIMIT 1), ?)""",
             (r["meter_id"], r["period_id"], r["meter_id"], r["period_id"], r["first_at"]),
         )
+
+
+def _sync_pair_projection(conn) -> None:
+    """启动收敛：配对投影全量按正式双侧重建，交错半截不得长期现行。"""
+    from app.services import pair_view
+
+    pair_view.sync_all_periods(conn)
 
 
 def seed_if_empty() -> None:
@@ -137,7 +165,16 @@ def seed_if_empty() -> None:
                     "INSERT INTO settings(key,value) VALUES ('estimate_lock_policy',?)",
                     (DEFAULT_POLICY,),
                 )
+            exists = conn.execute(
+                "SELECT 1 FROM settings WHERE key='pair_visibility_policy'"
+            ).fetchone()
+            if not exists:
+                conn.execute(
+                    "INSERT INTO settings(key,value) VALUES ('pair_visibility_policy',?)",
+                    (DEFAULT_PAIR_POLICY,),
+                )
             _backfill_locks(conn)
+            _sync_pair_projection(conn)
             conn.commit()
             return
         meters = [
@@ -194,8 +231,14 @@ def seed_if_empty() -> None:
             "INSERT INTO settings(key,value) VALUES ('estimate_lock_policy',?)",
             (DEFAULT_POLICY,),
         )
+        conn.execute(
+            "INSERT INTO settings(key,value) VALUES ('pair_visibility_policy',?)",
+            (DEFAULT_PAIR_POLICY,),
+        )
         # 默认 lock_on_actual：种子实抄即视为首笔实抄，补齐锁标记，保证口径一致
         _backfill_locks(conn)
+        # 配对投影与正式双侧同库同生：种子数据启动即收敛
+        _sync_pair_projection(conn)
         # 界面不露英文：表类型仍存 water/electric 码，前端映射为中文
         conn.commit()
     finally:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 from fastapi import APIRouter
+from app.config import PROJECT_NAME
 from app.db import connect
 from app.services.gate import get_policy, get_setting
 from app.services import pair_view
@@ -9,9 +10,16 @@ router = APIRouter(tags=["dashboard"])
 
 @router.get("/health")
 def health():
-    paired = pair_view.overview_paired(conn)
+    conn = connect()
+    try:
         return {
-            "paired_count": paired,"ok": True, "product": "抄表簿"}
+            "ok": True,
+            "product": PROJECT_NAME,
+            "paired_count": pair_view.overview_paired(conn),
+            "pair_visibility_policy": pair_view.get_pair_policy(conn),
+        }
+    finally:
+        conn.close()
 
 
 @router.get("/overview")
@@ -52,12 +60,19 @@ def overview():
         batches = [
             dict(r)
             for r in conn.execute(
-                "SELECT * FROM reconcile_batches ORDER BY created_at DESC LIMIT 8"
+                "SELECT * FROM reconcile_batches ORDER BY created_at DESC, rowid DESC LIMIT 8"
             ).fetchall()
         ]
+        # 总览已配计数跟选定口径（正式交集 / 投影表），并暴露分叉告警，不跟页面缓存
+        pair_div = pair_view.divergence(conn)
         return {
             "current_period": current,
             "estimate_lock_policy": policy,
+            "pair_visibility_policy": pair_view.get_pair_policy(conn),
+            "paired_count": pair_view.overview_paired(conn),
+            "pair_diverged": pair_div["diverged"],
+            "pair_ghost_count": len(pair_div["ghosts"]),
+            "pair_missing_count": len(pair_div["missing"]),
             "open_periods": open_periods,
             "sealed_periods": sealed_periods,
             "meter_count": meters,

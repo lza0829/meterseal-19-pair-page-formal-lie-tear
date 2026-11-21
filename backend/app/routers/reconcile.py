@@ -4,8 +4,9 @@ from pydantic import BaseModel
 from app.services import pair_view
 
 from app.db import connect
+from app.seed import PAIR_FORMAL
 from app.services import reconcile_service
-from app.services.gate import with_write_tx
+from app.services.gate import get_period, with_write_tx
 
 router = APIRouter(tags=["reconcile"])
 
@@ -36,14 +37,15 @@ def align(body: AlignIn):
 def batches(period_id: str | None = None):
     conn = connect()
     try:
+        # created_at 为秒级精度，同秒并列时按 rowid 倒序，保证「最新批」确定性
         if period_id:
             rows = conn.execute(
-                "SELECT * FROM reconcile_batches WHERE period_id=? ORDER BY created_at DESC",
+                "SELECT * FROM reconcile_batches WHERE period_id=? ORDER BY created_at DESC, rowid DESC",
                 (period_id,),
             ).fetchall()
         else:
             rows = conn.execute(
-                "SELECT * FROM reconcile_batches ORDER BY created_at DESC"
+                "SELECT * FROM reconcile_batches ORDER BY created_at DESC, rowid DESC"
             ).fetchall()
         return [dict(r) for r in rows]
     finally:
@@ -106,14 +108,51 @@ def periods():
 
 @router.get("/pairs")
 def pair_page(period_id: str | None = None):
+    """配对页：按全局口径出数；任何分叉都显式报出，绝不回执绿了仍分叉。"""
     conn = connect()
     try:
-        rows = pair_view.page_pairs(conn, period_id)
-        formal = pair_view.formal_intersection(conn, period_id) if period_id else set()
+        div = pair_view.divergence(conn, period_id)
         return {
-            "pairs": rows,
-            "paired_count": len(rows),
-            "formal_intersection_count": len(formal),
+            "period_id": period_id,
+            "pair_policy": pair_view.get_pair_policy(conn),
+            "pairs": pair_view.page_pairs(conn, period_id),
+            "paired_count": pair_view.paired_count(conn, period_id),
+            "formal_intersection_count": pair_view.formal_count(conn, period_id),
+            "projection_count": pair_view.projection_count(conn, period_id),
+            "diverged": div["diverged"],
+            "ghost_keys": div["ghosts"],
+            "missing_keys": div["missing"],
+            "consistent": not div["diverged"],
         }
     finally:
         conn.close()
+
+
+class RepairIn(BaseModel):
+    period_id: str
+
+
+@router.post("/pairs/repair")
+def repair_pairs(body: RepairIn):
+    """按口径收敛撕裂：formal=回滚半截配对投影；projection=剔幽灵+补投影。
+
+    正式读数是计量事实，投影不能反向捏造正式行，故修复只收敛投影侧。
+    """
+
+    def work(conn):
+        get_period(conn, body.period_id)
+        policy = pair_view.get_pair_policy(conn)
+        result = pair_view.sync_period(conn, body.period_id)
+        if pair_view.divergence(conn, body.period_id)["diverged"]:
+            raise HTTPException(500, "配对投影收敛失败：双侧键与投影仍分叉")
+        return {
+            "period_id": body.period_id,
+            "pair_policy": policy,
+            "action": "rollback_projection" if policy == PAIR_FORMAL else "converge_projection",
+            "added": result["added"],
+            "removed": result["removed"],
+            "paired_count": pair_view.paired_count(conn, body.period_id),
+            "consistent": True,
+        }
+
+    return with_write_tx(work)

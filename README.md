@@ -2,6 +2,9 @@
 
 骨架：抄表读数装载 → 估抄/实抄对齐 → 差额处置 → 账期封印。
 
+口径文档：[backend/ESTIMATE_LOCK.md](backend/ESTIMATE_LOCK.md)（估抄锁两架构）、
+[backend/PAIR_VISIBILITY.md](backend/PAIR_VISIBILITY.md)（配对可见性两架构）。
+
 - 前端 http://127.0.0.1:6010（勿用 6000，浏览器会拦）
 - 接口 http://127.0.0.1:11000
 

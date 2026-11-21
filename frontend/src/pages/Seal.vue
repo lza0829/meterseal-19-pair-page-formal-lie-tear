@@ -1,7 +1,7 @@
 <script setup>
 import { onMounted, ref } from 'vue'
 import { api } from '../api'
-import { 账期状态, 锁口径, 标 } from '../labels'
+import { 账期状态, 锁口径, 配对口径, 标 } from '../labels'
 const periods = ref([])
 const periodId = ref('2026-10')
 const batchId = ref('')
@@ -25,7 +25,7 @@ async function seal() {
   err.value = ''; msg.value = ''
   try {
     const r = await api.seal({ period_id: periodId.value, batch_id: batchId.value || null })
-    msg.value = `已封印 ${r.period_id}，绑定批 ${r.batch_id}`
+    msg.value = `已封印 ${r.period_id}，绑定批 ${r.batch_id}；封印预检已配 ${r.paired_count} 对（口径「${标(配对口径, r.pair_policy)}」）`
     await refresh()
   } catch (e) { err.value = e.message }
 }

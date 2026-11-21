@@ -23,7 +23,7 @@ async function align() {
   err.value = ''; msg.value = ''
   try {
     const r = await api.align(periodId.value)
-    msg.value = `对齐完成：匹配 ${r.matched_count}，差额 ${r.variance_count}，口径「${标(锁口径, r.policy)}」，锁标 ${r.locked_count} 个`
+    msg.value = `对齐完成：匹配 ${r.matched_count}，差额 ${r.variance_count}，已配 ${r.paired_count} 对，口径「${标(锁口径, r.policy)}」，锁标 ${r.locked_count} 个`
     await loadBatches()
   } catch (e) { err.value = e.message }
 }
@@ -88,13 +88,14 @@ onMounted(loadBatches)
     <div class="panel" v-if="allBatches.length">
       <h3>本账期对齐批沿革</h3>
       <table>
-        <thead><tr><th>批号</th><th>状态</th><th>口径</th><th>锁标数</th><th>匹配</th><th>差额</th><th>生成时刻</th></tr></thead>
+        <thead><tr><th>批号</th><th>状态</th><th>口径</th><th>锁标数</th><th>已配</th><th>匹配</th><th>差额</th><th>生成时刻</th></tr></thead>
         <tbody>
           <tr v-for="b in allBatches" :key="b.batch_id">
             <td>{{ b.batch_id }}</td>
             <td><span class="tag" :class="b.status">{{ 标(批状态, b.status) }}</span></td>
             <td>{{ 标(锁口径, b.policy) }}</td>
             <td>{{ b.locked_count ?? 0 }}</td>
+            <td>{{ b.paired_count ?? 0 }}</td>
             <td>{{ b.matched_count }}</td>
             <td>{{ b.variance_count }}</td>
             <td>{{ b.created_at }}</td>

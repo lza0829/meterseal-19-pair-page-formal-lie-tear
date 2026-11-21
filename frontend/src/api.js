@@ -31,6 +31,9 @@ export const api = {
   postActual: (body) => req('/actuals', { method: 'POST', body: JSON.stringify(body) }),
   periods: () => req('/periods'),
   align: (period_id) => req('/align', { method: 'POST', body: JSON.stringify({ period_id }) }),
+  pairs: (periodId) => req('/pairs' + (periodId ? `?period_id=${periodId}` : '')),
+  repairPairs: (period_id) =>
+    req('/pairs/repair', { method: 'POST', body: JSON.stringify({ period_id }) }),
   batches: (periodId) => req('/batches' + (periodId ? `?period_id=${periodId}` : '')),
   variances: (q) => {
     const sp = new URLSearchParams(q || {})

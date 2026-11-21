@@ -21,6 +21,7 @@ from app.main import app  # noqa: E402
 from app.db import connect  # noqa: E402
 
 _ALL_TABLES = (
+    "pair_projection",
     "variances",
     "reconcile_batches",
     "estimate_corrections",

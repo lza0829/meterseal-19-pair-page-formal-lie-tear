@@ -14,6 +14,12 @@ export const 锁口径 = {
   lock_on_actual: '首笔实抄锁定估抄',
   editable_until_sealed: '封印前估抄可改',
 }
+// 配对可见性口径必须与后端 settings.pair_visibility_policy 白名单同口径
+export const 配对口径 = {
+  formal_intersection: '以正式双侧键集合为准',
+  pair_projection: '以配对投影表为准',
+}
+export const 配对来源 = { formal_replay: '正式重放', projection: '投影物化' }
 
 export function 标(map, key) {
   if (key == null || key === '') return '—'

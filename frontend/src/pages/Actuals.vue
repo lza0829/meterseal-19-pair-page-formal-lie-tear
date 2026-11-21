@@ -22,7 +22,8 @@ async function submit() {
       ? (r.locked_now ? '；首笔实抄已锁定该表该账期估抄' : '；估抄锁标已存在')
       : '；当前口径实抄不锁估抄'
     const expireHint = r.expired_batches > 0 ? `；已作废 ${r.expired_batches} 个旧开放对齐批` : ''
-    msg.value = '实抄已装载' + lockHint + expireHint
+    const pairHint = r.paired_now ? '；该表该账期双侧已齐，已配对' : ''
+    msg.value = '实抄已装载' + lockHint + expireHint + pairHint
     await load()
   } catch (e) { err.value = e.message }
 }

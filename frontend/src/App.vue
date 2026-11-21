@@ -12,6 +12,7 @@
         <router-link to="/estimates">估抄</router-link>
         <router-link to="/actuals">实抄</router-link>
         <router-link to="/reconcile">对齐差额</router-link>
+        <router-link to="/pairs">配对结果</router-link>
         <router-link to="/seal">账期封印</router-link>
         <router-link to="/settings">设置</router-link>
       </nav>

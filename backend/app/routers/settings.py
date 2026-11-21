@@ -2,7 +2,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from app.db import connect
-from app.seed import DEFAULT_POLICY, VALID_POLICIES
+from app.seed import DEFAULT_PAIR_POLICY, DEFAULT_POLICY, VALID_PAIR_POLICIES, VALID_POLICIES
 
 router = APIRouter(tags=["settings"])
 
@@ -17,6 +17,7 @@ def list_settings():
     try:
         data = {r["key"]: r["value"] for r in conn.execute("SELECT * FROM settings").fetchall()}
         data.setdefault("estimate_lock_policy", DEFAULT_POLICY)
+        data.setdefault("pair_visibility_policy", DEFAULT_PAIR_POLICY)
         return data
     finally:
         conn.close()
@@ -28,6 +29,9 @@ def put_setting(key: str, body: SettingIn):
     if key == "estimate_lock_policy" and body.value not in VALID_POLICIES:
         allowed = ", ".join(VALID_POLICIES)
         raise HTTPException(400, f"非法估抄锁口径，允许值: {allowed}")
+    if key == "pair_visibility_policy" and body.value not in VALID_PAIR_POLICIES:
+        allowed = ", ".join(VALID_PAIR_POLICIES)
+        raise HTTPException(400, f"非法配对可见性口径，允许值: {allowed}")
     conn = connect()
     try:
         conn.execute(

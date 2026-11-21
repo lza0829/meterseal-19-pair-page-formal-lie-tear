@@ -1,7 +1,7 @@
 <script setup>
 import { onMounted, ref } from 'vue'
 import { api } from '../api'
-import { 批状态, 锁口径, 标 } from '../labels'
+import { 批状态, 锁口径, 配对口径, 标 } from '../labels'
 const data = ref(null)
 const err = ref('')
 onMounted(async () => {
@@ -16,6 +16,8 @@ onMounted(async () => {
     <div class="grid" v-if="data">
       <div class="stat">当前账期<b>{{ data.current_period }}</b></div>
       <div class="stat">锁口径<b>{{ 标(锁口径, data.estimate_lock_policy) }}</b></div>
+      <div class="stat">配对口径<b>{{ 标(配对口径, data.pair_visibility_policy) }}</b></div>
+      <div class="stat">已配对<b>{{ data.paired_count }}</b></div>
       <div class="stat">开放账期<b>{{ data.open_periods }}</b></div>
       <div class="stat">已封印账期<b>{{ data.sealed_periods }}</b></div>
       <div class="stat">表具数<b>{{ data.meter_count }}</b></div>
@@ -25,16 +27,23 @@ onMounted(async () => {
       <div class="stat">已作废对齐批<b>{{ data.expired_batch_count }}</b></div>
       <div class="stat">未决差额（开放批）<b>{{ data.pending_variances }}</b></div>
     </div>
+    <div class="panel" v-if="data && data.pair_diverged">
+      <p class="msg err">
+        配对投影与正式双侧键集合分叉：幽灵 {{ data.pair_ghost_count }} 键、缺失 {{ data.pair_missing_count }} 键。
+        请到「配对结果」页按口径修复收敛。
+      </p>
+    </div>
     <div class="panel" v-if="data">
       <h3>最近对账批</h3>
       <table>
-        <thead><tr><th>批号</th><th>账期</th><th>口径</th><th>锁标</th><th>匹配</th><th>差额</th><th>状态</th></tr></thead>
+        <thead><tr><th>批号</th><th>账期</th><th>口径</th><th>锁标</th><th>已配</th><th>匹配</th><th>差额</th><th>状态</th></tr></thead>
         <tbody>
           <tr v-for="b in data.recent_batches" :key="b.batch_id">
             <td>{{ b.batch_id }}</td>
             <td>{{ b.period_id }}</td>
             <td>{{ 标(锁口径, b.policy) }}</td>
             <td>{{ b.locked_count ?? 0 }}</td>
+            <td>{{ b.paired_count ?? 0 }}</td>
             <td>{{ b.matched_count }}</td>
             <td>{{ b.variance_count }}</td>
             <td><span class="tag" :class="b.status">{{ 标(批状态, b.status) }}</span></td>

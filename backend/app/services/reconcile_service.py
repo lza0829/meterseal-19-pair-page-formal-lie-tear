@@ -48,6 +48,8 @@ def run_align(period_id: str) -> dict:
         keys = sorted(set(est) | set(act))
         if not keys:
             raise HTTPException(400, "该账期无估抄/实抄可对齐")
+        # 已配键集合：正式估抄∩正式实抄，配对页与对齐批必须能由正式双侧重放
+        paired_keys = sorted(set(est) & set(act))
 
         # 锁标记快照：对齐瞬间该表该账期是否已被首笔实抄锁定
         # 有效锁受当前口径门控：editable_until_sealed 下即便存在历史锁行也不视为锁定
@@ -92,9 +94,9 @@ def run_align(period_id: str) -> dict:
         fingerprint = hashlib.sha256(fp_src.encode()).hexdigest()[:16]
         conn.execute(
             """INSERT INTO reconcile_batches
-               (batch_id,period_id,status,matched_count,variance_count,fingerprint,created_at,policy,locked_count)
-               VALUES (?,?,'open',?,?,?,?,?,?)""",
-            (batch_id, period_id, matched, len(variances), fingerprint, _now(), policy, len(locked)),
+               (batch_id,period_id,status,matched_count,variance_count,paired_count,fingerprint,created_at,policy,locked_count)
+               VALUES (?,?,'open',?,?,?,?,?,?,?)""",
+            (batch_id, period_id, matched, len(variances), len(paired_keys), fingerprint, _now(), policy, len(locked)),
         )
         if variances:
             conn.executemany(
@@ -103,15 +105,22 @@ def run_align(period_id: str) -> dict:
                    VALUES (?,?,?,?,?,?,?,?,?)""",
                 variances,
             )
+        # 配对投影与对齐批同一事务物化：剔幽灵 + 补缺失，回执不得绿了仍分叉
+        pair_view.sync_period(conn, period_id, source_batch_id=batch_id)
+        if pair_view.divergence(conn, period_id)["diverged"]:
+            raise HTTPException(500, "配对投影收敛失败：双侧键与投影仍分叉")
         return {
             "batch_id": batch_id,
             "period_id": period_id,
             "matched_count": matched,
             "variance_count": len(variances),
+            "paired_count": len(paired_keys),
             "fingerprint": fingerprint,
             "status": "open",
             "policy": policy,
             "locked_count": len(locked),
+            "pair_policy": pair_view.get_pair_policy(conn),
+            "pair_consistent": True,
         }
 
     return with_write_tx(work)
@@ -139,7 +148,7 @@ def seal_period(period_id: str, batch_id: str | None = None) -> dict:
         else:
             batch = conn.execute(
                 """SELECT * FROM reconcile_batches WHERE period_id=? AND status='open'
-                   ORDER BY created_at DESC LIMIT 1""",
+                   ORDER BY created_at DESC, rowid DESC LIMIT 1""",
                 (period_id,),
             ).fetchone()
             if not batch:
@@ -150,6 +159,12 @@ def seal_period(period_id: str, batch_id: str | None = None) -> dict:
             "SELECT COUNT(*) AS c FROM variances WHERE batch_id=? AND fate='pending'",
             (selected_batch_id,),
         ).fetchone()["c"]
+        # 封印预检：同事务先收敛投影，已配集合按选定口径取数，口径与集合必须一致
+        pair_view.sync_period(conn, period_id)
+        if pair_view.divergence(conn, period_id)["diverged"]:
+            raise HTTPException(500, "配对投影收敛失败：双侧键与投影仍分叉")
+        pair_policy = pair_view.get_pair_policy(conn)
+        paired = pair_view.paired_count(conn, period_id)
         sealed_at = _now()
         conn.execute(
             "UPDATE periods SET status='sealed', sealed_at=?, batch_no=? WHERE period_id=?",
@@ -165,6 +180,9 @@ def seal_period(period_id: str, batch_id: str | None = None) -> dict:
             "sealed_at": sealed_at,
             "pending_left": pending,
             "status": "sealed",
+            "paired_count": paired,
+            "pair_policy": pair_policy,
+            "pair_consistent": True,
         }
 
     return with_write_tx(work)
@@ -184,6 +202,16 @@ def set_fate(variance_id: str, fate: str) -> dict:
         if row["period_status"] == "sealed":
             raise HTTPException(409, "账期已封印，禁止改命运")
         conn.execute("UPDATE variances SET fate=? WHERE variance_id=?", (fate, variance_id))
-        return {"variance_id": variance_id, "fate": fate}
+        # 差额入口联动：处置同事务收敛该期投影，处置后页绿必须库不拧
+        pair_view.sync_period(conn, row["period_id"])
+        if pair_view.divergence(conn, row["period_id"])["diverged"]:
+            raise HTTPException(500, "配对投影收敛失败：双侧键与投影仍分叉")
+        return {
+            "variance_id": variance_id,
+            "fate": fate,
+            "paired_count": pair_view.paired_count(conn, row["period_id"]),
+            "pair_policy": pair_view.get_pair_policy(conn),
+            "pair_consistent": True,
+        }
 
     return with_write_tx(work)

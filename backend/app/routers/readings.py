@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.db import connect
+from app.services import pair_view
 from app.services.gate import (
     assert_estimate_mutable,
     assert_period_open,
@@ -148,7 +149,9 @@ def create_estimate(body: EstimateIn):
         except Exception as e:
             raise HTTPException(409, f"估抄写入失败: {e}") from e
         expired = expire_open_batches(conn, body.period_id)
-        return {"estimate_id": eid, "ok": True, "expired_batches": expired}
+        # 装载口联动：正式行与配对投影同一事务提交，禁止只改页面缓存
+        paired_now = pair_view.sync_key(conn, body.period_id, body.meter_id)
+        return {"estimate_id": eid, "ok": True, "expired_batches": expired, "paired_now": paired_now}
 
     return with_write_tx(work)
 
@@ -173,12 +176,15 @@ def revise_estimate(body: EstimateReviseIn):
             (body.qty, body.doc_no, _now(), target["estimate_id"]),
         )
         expired = expire_open_batches(conn, body.period_id)
+        # 修订不改键集合，但仍同事务复核投影，杜绝行齐投影卡住
+        paired_now = pair_view.sync_key(conn, body.period_id, body.meter_id)
         return {
             "estimate_id": target["estimate_id"],
             "ok": True,
             "qty": body.qty,
             "expired_batches": expired,
             "policy": get_policy(conn),
+            "paired_now": paired_now,
         }
 
     return with_write_tx(work)
@@ -267,6 +273,8 @@ def create_actual(body: ActualIn):
             locked_now = cur.rowcount > 0
         # 任一口径下，实抄变化都使旧 open 对齐批失效，防止对齐沿用旧实抄快照
         expired = expire_open_batches(conn, body.period_id)
+        # 装载口联动：正式行与配对投影同一事务提交，并发装载两笔不产生抢写窗口
+        paired_now = pair_view.sync_key(conn, body.period_id, body.meter_id)
         return {
             "actual_id": aid,
             "ok": True,
@@ -274,6 +282,7 @@ def create_actual(body: ActualIn):
             "estimate_locked": policy == "lock_on_actual",
             "locked_now": locked_now,
             "expired_batches": expired,
+            "paired_now": paired_now,
         }
 
     return with_write_tx(work)

@@ -37,7 +37,8 @@ async function submit() {
   try {
     const body = { ...form.value, doc_no: form.value.doc_no || ('估-' + Date.now()) }
     const r = await api.postEstimate(body)
-    msg.value = '估抄已装载' + expireHint(r.expired_batches)
+    const pairHint = r.paired_now ? '；该表该账期双侧已齐，已配对' : ''
+    msg.value = '估抄已装载' + pairHint + expireHint(r.expired_batches)
     await load()
   } catch (e) { err.value = e.message }
 }
@@ -92,9 +93,9 @@ onMounted(load)
 const pairedHint = ref(0)
 onMounted(async () => {
   try {
-    const p = await api.get('/api/pairs')
+    const p = await api.pairs(periodId.value)
     pairedHint.value = p.paired_count || 0
-  } catch (_) {}
+  } catch (_) { pairedHint.value = 0 }
 })
 </script>
 <template>
@@ -105,6 +106,7 @@ onMounted(async () => {
       <b>{{ 标(锁口径, policy) }}</b>
       <template v-if="isLockPolicy">（首笔正式实抄到达即锁定该表该账期估抄，纠错走订正）</template>
       <template v-else>（账期封印前估抄始终可覆盖修订，改后开放对齐批自动作废）</template>
+      · 本账期已配对 {{ pairedHint }} 对（详见「配对结果」）
     </p>
     <div class="row">
       <label>账期筛选<input v-model="periodId" /></label>
